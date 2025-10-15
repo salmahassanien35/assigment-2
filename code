@@ -1,1 +1,140 @@
 
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+import numpy as np
+
+transform = transforms.Compose([
+    transforms.ToTensor(), 
+    transforms.Normalize((0.5,), (0.5,))
+])
+
+train_data = datasets.FashionMNIST(root='./data', train=True, download=True, transform=transform)
+test_data = datasets.FashionMNIST(root='./data', train=False, download=True, transform=transform)
+
+train_loader = DataLoader(train_data, batch_size=64, shuffle=True)
+test_loader = DataLoader(test_data, batch_size=64, shuffle=False)
+
+
+class FashionNN(nn.Module):
+    def __init__(self):
+        super(FashionNN, self).__init__()
+        self.fc1 = nn.Linear(28*28, 256)
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(128, 10)
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+model = FashionNN()
+
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+
+epochs = 10
+train_losses, test_losses, train_accs, test_accs = [], [], [], []
+
+for epoch in range(epochs):
+    model.train()
+    correct, total, running_loss = 0, 0, 0
+    for images, labels in train_loader:
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        _, predicted = torch.max(outputs, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+    
+    train_accuracy = 100 * correct / total
+    train_losses.append(running_loss / len(train_loader))
+    train_accs.append(train_accuracy)
+
+    model.eval()
+    correct, total, test_loss = 0, 0, 0
+    with torch.no_grad():
+        for images, labels in test_loader:
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            test_loss += loss.item()
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    
+    test_accuracy = 100 * correct / total
+    test_losses.append(test_loss / len(test_loader))
+    test_accs.append(test_accuracy)
+
+    print(f"Epoch [{epoch+1}/{epochs}] Train Acc: {train_accuracy:.2f}% | Test Acc: {test_accuracy:.2f}%")
+
+
+plt.figure(figsize=(12,5))
+plt.subplot(1,2,1)
+plt.plot(train_losses, label='Train Loss')
+plt.plot(test_losses, label='Test Loss')
+plt.legend()
+plt.title('Loss per Epoch')
+
+plt.subplot(1,2,2)
+plt.plot(train_accs, label='Train Accuracy')
+plt.plot(test_accs, label='Test Accuracy')
+plt.legend()
+plt.title('Accuracy per Epoch')
+plt.show()
+
+all_preds = []
+all_labels = []
+
+model.eval()
+with torch.no_grad():
+    for images, labels in test_loader:
+        outputs = model(images)
+        _, preds = torch.max(outputs, 1)
+        all_preds.extend(preds.numpy())
+        all_labels.extend(labels.numpy())
+
+cm = confusion_matrix(all_labels, all_preds)
+plt.figure(figsize=(10,8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=train_data.classes,
+            yticklabels=train_data.classes)
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.title('Confusion Matrix')
+plt.show()
+
+
+def show_predictions(model, loader, n=6):
+    model.eval()
+    images, labels = next(iter(loader))
+    outputs = model(images)
+    _, preds = torch.max(outputs, 1)
+
+    plt.figure(figsize=(12,4))
+    for i in range(n):
+        plt.subplot(2, n//2, i+1)
+        plt.imshow(images[i].squeeze(), cmap='gray')
+        color = 'green' if preds[i] == labels[i] else 'red'
+        plt.title(f"Pred: {train_data.classes[preds[i]]}\nTrue: {train_data.classes[labels[i]]}", color=color)
+        plt.axis('off')
+    plt.show()
+
+show_predictions(model, test_loader)
+
+print("Conclusion: The model achieved around {:.2f}% test accuracy. Using a simple fully-connected network, it performs well on Fashion-MNIST. Further improvement could come from CNN architectures or data augmentation.".format(test_accs[-1]))
+
